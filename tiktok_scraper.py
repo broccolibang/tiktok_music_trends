@@ -8,6 +8,7 @@ import re
 import sys
 import csv
 import time
+import random
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -22,7 +23,17 @@ import os
 # Configuration
 MAX_VIDEOS_TO_SCRAPE = None  # Set to None for all videos, or a number like 50 to limit
 
-# Removed random_delay function - no delays for faster scraping
+def random_delay(min_seconds=1.0, max_seconds=3.0):
+    """
+    Generate a random delay to make scraping more human-like.
+    
+    Args:
+        min_seconds (float): Minimum delay in seconds
+        max_seconds (float): Maximum delay in seconds
+    """
+    delay = random.uniform(min_seconds, max_seconds)
+    time.sleep(delay)
+    return delay
 
 def validate_tiktok_url(url):
     """
@@ -187,6 +198,8 @@ def scrape_tiktok_profile(url):
         # Navigate to the profile page
         print(f"📄 Navigating to profile...")
         driver.get(url)
+        delay = random_delay(1, 2)  # Random delay for page load
+        print(f"   ⏱️  Waited {delay:.1f}s for page to load")
         
         # Automatic scrolling phase
         print("\n🤖 Starting automatic scrolling and loading...")
@@ -227,6 +240,8 @@ def scrape_tiktok_profile(url):
         time.sleep(1)
         
         print("🤖 Starting automated scraping phase...")
+        delay = random_delay(1, 2)  # Random delay before starting
+        print(f"   ⏱️  Waited {delay:.1f}s before starting automation")
         
         # Find all video containers
         print("🔍 Finding video containers...")
@@ -273,6 +288,11 @@ def scrape_tiktok_profile(url):
         
         for i in range(videos_to_scrape):
             try:
+                # Add a random delay between videos (except for the first one)
+                if i > 0:
+                    between_videos_delay = random_delay(1, 2)
+                    print(f"   ⏱️  Inter-video delay: {between_videos_delay:.1f}s")
+                
                 print(f"\n📹 Processing video {i + 1}/{videos_to_scrape}...")
                 
                 # Re-find video containers (they might change after navigation)
@@ -310,7 +330,14 @@ def scrape_tiktok_profile(url):
                         pass
                 
                 # Click on the video to open detailed view
+                click_delay = random_delay(1, 2)  # Random delay before click
+                print(f"   ⏱️  Pre-click delay: {click_delay:.1f}s")
+                
                 driver.execute_script("arguments[0].click();", video_container)
+                
+                # Random delay for video page to load
+                load_delay = random_delay(1, 2)  # Longer delay for video loading
+                print(f"   ⏱️  Video load delay: {load_delay:.1f}s")
                 
                 # Extract detailed metrics from the video page
                 likes = "0"
@@ -419,11 +446,15 @@ def scrape_tiktok_profile(url):
                 
                 # Go back to profile
                 driver.back()
+                back_delay = random_delay(1, 2)  # Random delay after going back
+                print(f"   ⏱️  Back navigation delay: {back_delay:.1f}s")
                 
             except Exception as e:
                 print(f"❌ Error processing video {i + 1}: {e}")
                 try:
                     driver.back()
+                    error_delay = random_delay(1, 2)  # Random delay after error
+                    print(f"   ⏱️  Error recovery delay: {error_delay:.1f}s")
                 except:
                     pass
                 continue
@@ -618,7 +649,11 @@ def main():
                 print(f"❌ Error processing profile {i}: {e}")
                 continue
             
-            # Continue to next profile immediately
+            # Add delay between profiles if there are more to process
+            if i < len(tiktok_urls):
+                print(f"\n⏳ Waiting before next profile...")
+                between_profiles_delay = random_delay(1, 2)
+                print(f"   ⏱️  Inter-profile delay: {between_profiles_delay:.1f}s")
         
         # Step 4: Handle combined output if needed
         if not separate_files and all_video_data:
