@@ -201,43 +201,75 @@ def scrape_tiktok_profile(url):
         delay = random_delay(1, 2)  # Random delay for page load
         print(f"   ⏱️  Waited {delay:.1f}s for page to load")
         
-        # Automatic scrolling phase
-        print("\n🤖 Starting automatic scrolling and loading...")
+        # Automatic scrolling phase to load ALL videos
+        print("\n🤖 Starting automatic scrolling to load ALL videos...")
+        print("📜 This may take several minutes for profiles with many videos...")
         
         # Wait for initial page load
-        time.sleep(3)
+        time.sleep(5)
         
-        # Get initial page height
+        # Get initial state
         last_height = driver.execute_script("return document.body.scrollHeight")
-        
-        # Scroll to bottom multiple times to load all videos
         scroll_attempts = 0
-        max_scroll_attempts = 10  # Prevent infinite scrolling
+        no_change_count = 0
+        max_no_change = 5  # More attempts before giving up
         
-        print("📜 Scrolling to load all videos...")
-        while scroll_attempts < max_scroll_attempts:
-            # Scroll to bottom
+        print("📜 Scrolling to bottom repeatedly until all videos are loaded...")
+        
+        while no_change_count < max_no_change and scroll_attempts < 100:  # Higher limit for large profiles
+            scroll_attempts += 1
+            
+            # Get current video count for progress tracking
+            current_videos = len(driver.find_elements(By.CSS_SELECTOR, 'a[href*="/video/"]'))
+            if current_videos == 0:
+                current_videos = len(driver.find_elements(By.CSS_SELECTOR, '[data-e2e="user-post-item"]'))
+            
+            # Scroll all the way to the absolute bottom
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             
-            # Wait for new content to load
-            time.sleep(2)
+            # Wait longer for TikTok's lazy loading to kick in
+            time.sleep(6)  # Longer wait for content to load
             
-            # Calculate new scroll height and compare with last scroll height
+            # Get new height after scrolling
             new_height = driver.execute_script("return document.body.scrollHeight")
             
+            # Get new video count
+            new_video_count = len(driver.find_elements(By.CSS_SELECTOR, 'a[href*="/video/"]'))
+            if new_video_count == 0:
+                new_video_count = len(driver.find_elements(By.CSS_SELECTOR, '[data-e2e="user-post-item"]'))
+            
             if new_height == last_height:
-                # No new content loaded, we've reached the end
-                break
-                
-            last_height = new_height
-            scroll_attempts += 1
-            print(f"   📜 Scroll attempt {scroll_attempts}: New content loaded")
+                no_change_count += 1
+                print(f"   📜 Scroll {scroll_attempts}: No height change ({no_change_count}/{max_no_change}) - Videos: {new_video_count}")
+            else:
+                no_change_count = 0  # Reset counter when new content loads
+                videos_loaded = new_video_count - current_videos
+                print(f"   📜 Scroll {scroll_attempts}: Page expanded! Videos: {new_video_count} (+{videos_loaded})")
+                last_height = new_height
+            
+            # Extra check: try a small additional scroll to trigger any remaining lazy loading
+            if no_change_count == 0:  # Only if we just loaded new content
+                driver.execute_script("window.scrollBy(0, 500);")
+                time.sleep(2)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
         
-        print(f"✅ Finished scrolling after {scroll_attempts} attempts")
+        # Final count
+        final_video_count = len(driver.find_elements(By.CSS_SELECTOR, 'a[href*="/video/"]'))
+        if final_video_count == 0:
+            final_video_count = len(driver.find_elements(By.CSS_SELECTOR, '[data-e2e="user-post-item"]'))
+        
+        if scroll_attempts >= 100:
+            print(f"   ⚠️ Reached maximum scroll attempts (100) - may have more videos")
+        else:
+            print(f"   ✅ Completed scrolling - no more content loading")
+            
+        print(f"🎯 FINAL RESULT: {final_video_count} videos loaded after {scroll_attempts} scroll attempts")
         
         # Scroll back to top to start scraping from the beginning
+        print("🔝 Scrolling back to top to start scraping...")
         driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(1)
+        time.sleep(3)
         
         print("🤖 Starting automated scraping phase...")
         delay = random_delay(1, 2)  # Random delay before starting
