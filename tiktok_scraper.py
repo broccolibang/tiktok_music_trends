@@ -1,0 +1,507 @@
+#!/usr/bin/env python3
+"""
+TikTok Scraper - Enhanced with Selenium
+A TikTok scraper that extracts video metrics and saves to CSV.
+"""
+
+import re
+import sys
+import csv
+import time
+import random
+from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
+import os
+
+# Configuration
+MAX_VIDEOS_TO_SCRAPE = None  # Set to None for all videos, or a number like 50 to limit
+
+def random_delay(min_seconds=1, max_seconds=3):
+    """
+    Generate a random delay to make scraping more human-like.
+    
+    Args:
+        min_seconds (float): Minimum delay in seconds
+        max_seconds (float): Maximum delay in seconds
+    """
+    delay = random.uniform(min_seconds, max_seconds)
+    time.sleep(delay)
+    return delay
+
+def validate_tiktok_url(url):
+    """
+    Validate if the provided URL is a valid TikTok URL.
+    
+    Args:
+        url (str): The URL to validate
+        
+    Returns:
+        bool: True if valid TikTok URL, False otherwise
+    """
+    # TikTok URL patterns
+    tiktok_patterns = [
+        r'https?://(?:www\.)?tiktok\.com/@[\w.-]+/video/\d+',  # Standard video URL
+        r'https?://(?:www\.)?tiktok\.com/t/\w+',              # Short URL
+        r'https?://vm\.tiktok\.com/\w+',                      # Mobile short URL
+        r'https?://(?:www\.)?tiktok\.com/@[\w.-]+',           # Profile URL
+    ]
+    
+    return any(re.match(pattern, url.strip()) for pattern in tiktok_patterns)
+
+def get_tiktok_url():
+    """
+    Get TikTok URL from user input with validation.
+    
+    Returns:
+        str: Valid TikTok URL
+    """
+    print("🎵 TikTok Scraper - URL Input")
+    print("=" * 40)
+    print("Please enter a TikTok URL to scrape:")
+    print("Supported formats:")
+    print("  • https://www.tiktok.com/@username/video/1234567890")
+    print("  • https://tiktok.com/t/shortcode")
+    print("  • https://vm.tiktok.com/shortcode")
+    print("  • https://www.tiktok.com/@username")
+    print()
+    
+    while True:
+        try:
+            url = input("Enter TikTok URL: ").strip()
+            
+            # Check if user wants to exit
+            if url.lower() in ['exit', 'quit', 'q']:
+                print("👋 Goodbye!")
+                sys.exit(0)
+            
+            # Check if URL is empty
+            if not url:
+                print("❌ Please enter a URL or type 'exit' to quit.")
+                continue
+            
+            # Validate TikTok URL
+            if validate_tiktok_url(url):
+                print(f"✅ Valid TikTok URL detected: {url}")
+                return url
+            else:
+                print("❌ Invalid TikTok URL. Please enter a valid TikTok URL.")
+                print("   Example: https://www.tiktok.com/@username/video/1234567890")
+                continue
+                
+        except KeyboardInterrupt:
+            print("\n👋 Goodbye!")
+            sys.exit(0)
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            continue
+
+def parse_count(count_str):
+    """
+    Parse TikTok count strings like '142.5K', '1.2M' to integers.
+    
+    Args:
+        count_str (str): Count string from TikTok
+        
+    Returns:
+        int: Parsed count as integer
+    """
+    if not count_str:
+        return 0
+    
+    count_str = count_str.strip().upper()
+    
+    # Remove any non-numeric characters except K, M, B and decimal points
+    import re
+    clean_str = re.sub(r'[^0-9KMB.]', '', count_str)
+    
+    if 'K' in clean_str:
+        return int(float(clean_str.replace('K', '')) * 1000)
+    elif 'M' in clean_str:
+        return int(float(clean_str.replace('M', '')) * 1000000)
+    elif 'B' in clean_str:
+        return int(float(clean_str.replace('B', '')) * 1000000000)
+    else:
+        try:
+            return int(float(clean_str))
+        except:
+            return 0
+
+def scrape_tiktok_profile(url):
+    """
+    Scrape TikTok profile videos using Selenium.
+    
+    Args:
+        url (str): TikTok profile URL
+        
+    Returns:
+        list: List of video data dictionaries
+    """
+    print(f"\n🚀 Starting TikTok profile scraping...")
+    print(f"📱 Profile URL: {url}")
+    
+    video_data = []
+    driver = None
+    
+    try:
+        # Setup Chrome options
+        print("🌐 Launching browser...")
+        chrome_options = Options()
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        
+        # Uncomment the next line for headless mode
+        # chrome_options.add_argument("--headless")
+        
+        # Initialize WebDriver with automatic ChromeDriver management
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        wait = WebDriverWait(driver, 10)
+        
+        # Navigate to the profile page
+        print(f"📄 Navigating to profile...")
+        driver.get(url)
+        delay = random_delay(2, 4)  # Random delay for page load
+        print(f"   ⏱️  Waited {delay:.1f}s for page to load")
+        
+        # Manual navigation phase
+        print("\n" + "="*60)
+        print("🛠️  MANUAL NAVIGATION PHASE")
+        print("="*60)
+        print("📋 Please perform the following steps manually:")
+        print("   1. 📅 Click on 'Oldest' to sort videos chronologically")
+        print("   2. 🔄 Wait for the page to fully load")
+        print("   3. 📱 Scroll down if needed to see more videos")
+        print("   4. ✅ Verify you can see the video thumbnails")
+        print("\n💡 The browser window is open - you can interact with it now!")
+        print("🚀 Once you're ready, press ENTER to start automated scraping...")
+        
+        # Wait for user input
+        try:
+            input()  # This will pause execution until user presses Enter
+        except KeyboardInterrupt:
+            print("\n👋 Scraping cancelled by user")
+            return video_data
+        
+        print("\n🤖 Starting automated scraping phase...")
+        delay = random_delay(1.5, 3)  # Random delay before starting
+        print(f"   ⏱️  Waited {delay:.1f}s before starting automation")
+        
+        # Find all video containers
+        print("🔍 Finding video containers...")
+        video_containers = []
+        
+        try:
+            # Try TikTok's actual video link selectors
+            video_containers = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/video/"]')
+            print(f"   ✅ Found video links: {len(video_containers)}")
+        except:
+            pass
+        
+        if not video_containers:
+            try:
+                # Try the specific video container class from TikTok
+                video_containers = driver.find_elements(By.CSS_SELECTOR, 'a.css-1mdo0pl-AVideoContainer')
+                print(f"   ✅ Found video containers by class: {len(video_containers)}")
+            except:
+                pass
+        
+        if not video_containers:
+            try:
+                # Fallback to generic video containers
+                video_containers = driver.find_elements(By.CSS_SELECTOR, '[data-e2e="user-post-item"]')
+                print(f"   ✅ Found generic containers: {len(video_containers)}")
+            except:
+                pass
+        
+        video_count = len(video_containers)
+        print(f"📹 Found {video_count} videos to scrape")
+        
+        if video_count == 0:
+            print("❌ No videos found on this profile")
+            print("💡 Try scrolling down manually or check if the profile has videos")
+            return video_data
+        
+        # Determine how many videos to scrape
+        videos_to_scrape = video_count if MAX_VIDEOS_TO_SCRAPE is None else min(video_count, MAX_VIDEOS_TO_SCRAPE)
+        
+        if MAX_VIDEOS_TO_SCRAPE is None:
+            print(f"🎯 Will scrape all {videos_to_scrape} videos found")
+        else:
+            print(f"🎯 Will scrape {videos_to_scrape} videos (limited by MAX_VIDEOS_TO_SCRAPE = {MAX_VIDEOS_TO_SCRAPE})")
+        
+        for i in range(videos_to_scrape):
+            try:
+                # Add a random delay between videos (except for the first one)
+                if i > 0:
+                    between_videos_delay = random_delay(1, 3)
+                    print(f"   ⏱️  Inter-video delay: {between_videos_delay:.1f}s")
+                
+                print(f"\n📹 Processing video {i + 1}/{videos_to_scrape}...")
+                
+                # Re-find video containers (they might change after navigation)
+                try:
+                    video_containers = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/video/"]')
+                    if not video_containers:
+                        video_containers = driver.find_elements(By.CSS_SELECTOR, 'a.css-1mdo0pl-AVideoContainer')
+                    if not video_containers:
+                        video_containers = driver.find_elements(By.CSS_SELECTOR, '[data-e2e="user-post-item"]')
+                except:
+                    print(f"❌ Could not find video containers after navigation")
+                    break
+                
+                if i >= len(video_containers):
+                    print(f"❌ Video {i + 1} not found in updated container list")
+                    break
+                
+                video_container = video_containers[i]
+                
+                # Extract view count from the profile page using TikTok's actual selector
+                view_count = "0"
+                try:
+                    # Use TikTok's exact selector for video views
+                    view_element = video_container.find_element(By.CSS_SELECTOR, 'strong[data-e2e="video-views"]')
+                    view_count = view_element.text
+                    print(f"   ✅ Found profile view count: {view_count}")
+                except:
+                    try:
+                        # Alternative selector with class
+                        view_element = video_container.find_element(By.CSS_SELECTOR, 'strong.video-count')
+                        view_count = view_element.text
+                        print(f"   ✅ Found profile view count (alt): {view_count}")
+                    except:
+                        print(f"   ⚠️  No view count found on profile page")
+                        pass
+                
+                # Click on the video to open detailed view
+                click_delay = random_delay(0.5, 1.5)  # Random delay before click
+                print(f"   ⏱️  Pre-click delay: {click_delay:.1f}s")
+                
+                driver.execute_script("arguments[0].click();", video_container)
+                
+                # Random delay for video page to load
+                load_delay = random_delay(2.5, 4.5)  # Longer delay for video loading
+                print(f"   ⏱️  Video load delay: {load_delay:.1f}s")
+                
+                # Extract detailed metrics from the video page
+                likes = "0"
+                bookmarks = "0" 
+                comments = "0"
+                
+                print(f"   🔍 Extracting metrics from video page...")
+                
+                # Use TikTok's exact selectors for individual video page metrics
+                # These selectors are based on the actual TikTok HTML structure
+                
+                # Extract likes using TikTok's browse-like-count selector
+                try:
+                    like_element = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e="browse-like-count"]')
+                    likes = like_element.text.strip()
+                    print(f"   ✅ Found likes: {likes} (TikTok selector: browse-like-count)")
+                except:
+                    print(f"   ⚠️  No likes found with TikTok selector")
+                
+                # Extract bookmarks using TikTok's undefined-count selector 
+                # Note: TikTok actually uses "undefined-count" for bookmarks/saves - this is their internal naming!
+                try:
+                    bookmark_element = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e="undefined-count"]')
+                    bookmarks = bookmark_element.text.strip()
+                    print(f"   ✅ Found bookmarks: {bookmarks} (TikTok selector: undefined-count)")
+                except:
+                    print(f"   ⚠️  No bookmarks found with TikTok selector")
+                
+                # Extract comments using TikTok's browse-comment-count selector
+                try:
+                    comment_element = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e="browse-comment-count"]')
+                    comments = comment_element.text.strip()
+                    print(f"   ✅ Found comments: {comments} (TikTok selector: browse-comment-count)")
+                except:
+                    print(f"   ⚠️  No comments found with TikTok selector")
+                
+                # Try to get view count from individual video page if we didn't get it from profile
+                if view_count == "0":
+                    try:
+                        # Try to find view count on the individual video page
+                        view_element = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e="video-views"]')
+                        view_count = view_element.text.strip()
+                        print(f"   ✅ Found views on video page: {view_count}")
+                    except:
+                        print(f"   ⚠️  No view count found on video page either")
+                
+                # If any metrics are still missing, try fallback selectors (but TikTok's selectors should work)
+                if likes == "0" or comments == "0" or bookmarks == "0":
+                    print(f"   🔄 Some metrics missing, trying fallback selectors...")
+                    
+                    if likes == "0":
+                        try:
+                            # Fallback like selectors
+                            fallback_like = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e*="like"]')
+                            likes = fallback_like.text.strip()
+                            print(f"   ✅ Found likes (fallback): {likes}")
+                        except:
+                            pass
+                    
+                    if comments == "0":
+                        try:
+                            # Fallback comment selectors
+                            fallback_comment = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e*="comment"]')
+                            comments = fallback_comment.text.strip()
+                            print(f"   ✅ Found comments (fallback): {comments}")
+                        except:
+                            pass
+                    
+                    if bookmarks == "0":
+                        try:
+                            # Fallback bookmark selectors
+                            fallback_bookmark = driver.find_element(By.CSS_SELECTOR, 'strong[data-e2e*="bookmark"], strong[data-e2e*="collect"], strong[data-e2e*="save"]')
+                            bookmarks = fallback_bookmark.text.strip()
+                            print(f"   ✅ Found bookmarks (fallback): {bookmarks}")
+                        except:
+                            pass
+                
+                # Get video URL
+                current_url = driver.current_url
+                
+                # Parse the counts
+                parsed_views = parse_count(view_count)
+                parsed_likes = parse_count(likes)
+                parsed_bookmarks = parse_count(bookmarks)
+                parsed_comments = parse_count(comments)
+                
+                video_info = {
+                    'video_url': current_url,
+                    'views': parsed_views,
+                    'likes': parsed_likes,
+                    'bookmarks': parsed_bookmarks,
+                    'comments': parsed_comments,
+                    'views_raw': view_count,
+                    'likes_raw': likes,
+                    'bookmarks_raw': bookmarks,
+                    'comments_raw': comments,
+                    'scraped_at': datetime.now().isoformat()
+                }
+                
+                video_data.append(video_info)
+                
+                print(f"   👁️  Views: {view_count} ({parsed_views:,})")
+                print(f"   ❤️  Likes: {likes} ({parsed_likes:,})")
+                print(f"   🔖 Bookmarks: {bookmarks} ({parsed_bookmarks:,})")
+                print(f"   💬 Comments: {comments} ({parsed_comments:,})")
+                
+                # Go back to profile
+                driver.back()
+                back_delay = random_delay(1.5, 3)  # Random delay after going back
+                print(f"   ⏱️  Back navigation delay: {back_delay:.1f}s")
+                
+            except Exception as e:
+                print(f"❌ Error processing video {i + 1}: {e}")
+                try:
+                    driver.back()
+                    error_delay = random_delay(1, 2)  # Random delay after error
+                    print(f"   ⏱️  Error recovery delay: {error_delay:.1f}s")
+                except:
+                    pass
+                continue
+        
+    except Exception as e:
+        print(f"❌ Error during scraping: {e}")
+    
+    finally:
+        if driver:
+            print("🔒 Closing browser...")
+            driver.quit()
+    
+    return video_data
+
+def save_to_csv(video_data, filename=None):
+    """
+    Save video data to CSV file.
+    
+    Args:
+        video_data (list): List of video data dictionaries
+        filename (str): Optional filename, defaults to timestamp-based name
+    """
+    if not video_data:
+        print("❌ No data to save")
+        return
+    
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"tiktok_scrape_{timestamp}.csv"
+    
+    print(f"\n💾 Saving data to {filename}...")
+    
+    # Ensure data directory exists
+    os.makedirs('data', exist_ok=True)
+    filepath = os.path.join('data', filename)
+    
+    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['video_url', 'views', 'likes', 'bookmarks', 'comments', 
+                     'views_raw', 'likes_raw', 'bookmarks_raw', 'comments_raw', 'scraped_at']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        for video in video_data:
+            writer.writerow(video)
+    
+    print(f"✅ Saved {len(video_data)} videos to {filepath}")
+    
+    # Print summary
+    total_views = sum(video['views'] for video in video_data)
+    total_likes = sum(video['likes'] for video in video_data)
+    total_bookmarks = sum(video['bookmarks'] for video in video_data)
+    total_comments = sum(video['comments'] for video in video_data)
+    
+    print(f"\n📊 Scraping Summary:")
+    print(f"   📹 Videos scraped: {len(video_data)}")
+    print(f"   👁️  Total views: {total_views:,}")
+    print(f"   ❤️  Total likes: {total_likes:,}")
+    print(f"   🔖 Total bookmarks: {total_bookmarks:,}")
+    print(f"   💬 Total comments: {total_comments:,}")
+
+def main():
+    """
+    Main function to run the TikTok scraper.
+    """
+    try:
+        # Step 1: Get TikTok URL from user
+        tiktok_url = get_tiktok_url()
+        
+        print(f"\n🎯 URL to scrape: {tiktok_url}")
+        
+        # Check if it's a profile URL
+        if not ('/@' in tiktok_url and '/video/' not in tiktok_url):
+            print("❌ Please provide a TikTok profile URL (not an individual video)")
+            print("   Example: https://www.tiktok.com/@username")
+            return
+        
+        # Step 2: Scrape the profile
+        video_data = scrape_tiktok_profile(tiktok_url)
+        
+        if not video_data:
+            print("❌ No video data was extracted")
+            return
+        
+        # Step 3: Save to CSV
+        save_to_csv(video_data)
+        
+        print("\n🎉 Scraping completed successfully!")
+        
+    except Exception as e:
+        print(f"❌ An error occurred: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
