@@ -8,7 +8,6 @@ import re
 import sys
 import csv
 import time
-import random
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -23,17 +22,7 @@ import os
 # Configuration
 MAX_VIDEOS_TO_SCRAPE = None  # Set to None for all videos, or a number like 50 to limit
 
-def random_delay(min_seconds=1, max_seconds=3):
-    """
-    Generate a random delay to make scraping more human-like.
-    
-    Args:
-        min_seconds (float): Minimum delay in seconds
-        max_seconds (float): Maximum delay in seconds
-    """
-    delay = random.uniform(min_seconds, max_seconds)
-    time.sleep(delay)
-    return delay
+# Removed random_delay function - no delays for faster scraping
 
 def validate_tiktok_url(url):
     """
@@ -55,44 +44,63 @@ def validate_tiktok_url(url):
     
     return any(re.match(pattern, url.strip()) for pattern in tiktok_patterns)
 
-def get_tiktok_url():
+def get_tiktok_urls():
     """
-    Get TikTok URL from user input with validation.
+    Get multiple TikTok URLs from user input with validation.
     
     Returns:
-        str: Valid TikTok URL
+        list: List of valid TikTok URLs
     """
-    print("🎵 TikTok Scraper - URL Input")
-    print("=" * 40)
-    print("Please enter a TikTok URL to scrape:")
+    print("🎵 TikTok Scraper - Multiple URL Input")
+    print("=" * 50)
+    print("Please enter TikTok URLs to scrape (one per line):")
     print("Supported formats:")
     print("  • https://www.tiktok.com/@username/video/1234567890")
     print("  • https://tiktok.com/t/shortcode")
     print("  • https://vm.tiktok.com/shortcode")
     print("  • https://www.tiktok.com/@username")
     print()
+    print("💡 Tips:")
+    print("  • Enter one URL per line")
+    print("  • Press ENTER on an empty line when done")
+    print("  • Type 'exit' to quit")
+    print()
+    
+    urls = []
+    url_count = 1
     
     while True:
         try:
-            url = input("Enter TikTok URL: ").strip()
+            prompt = f"Enter TikTok URL #{url_count} (or press ENTER to finish): "
+            url = input(prompt).strip()
             
             # Check if user wants to exit
             if url.lower() in ['exit', 'quit', 'q']:
                 print("👋 Goodbye!")
                 sys.exit(0)
             
-            # Check if URL is empty
+            # Check if user is done (empty input)
             if not url:
-                print("❌ Please enter a URL or type 'exit' to quit.")
-                continue
+                if urls:
+                    break
+                else:
+                    print("❌ Please enter at least one URL or type 'exit' to quit.")
+                    continue
             
             # Validate TikTok URL
             if validate_tiktok_url(url):
-                print(f"✅ Valid TikTok URL detected: {url}")
-                return url
+                # Check if it's a profile URL (not individual video)
+                if not ('/@' in url and '/video/' not in url):
+                    print("❌ Please provide a TikTok profile URL (not an individual video)")
+                    print("   Example: https://www.tiktok.com/@username")
+                    continue
+                
+                urls.append(url)
+                print(f"✅ Added URL #{url_count}: {url}")
+                url_count += 1
             else:
                 print("❌ Invalid TikTok URL. Please enter a valid TikTok URL.")
-                print("   Example: https://www.tiktok.com/@username/video/1234567890")
+                print("   Example: https://www.tiktok.com/@username")
                 continue
                 
         except KeyboardInterrupt:
@@ -101,6 +109,12 @@ def get_tiktok_url():
         except Exception as e:
             print(f"❌ Error: {e}")
             continue
+    
+    print(f"\n🎯 Total URLs queued: {len(urls)}")
+    for i, url in enumerate(urls, 1):
+        print(f"   {i}. {url}")
+    
+    return urls
 
 def parse_count(count_str):
     """
@@ -173,31 +187,46 @@ def scrape_tiktok_profile(url):
         # Navigate to the profile page
         print(f"📄 Navigating to profile...")
         driver.get(url)
-        delay = random_delay(2, 4)  # Random delay for page load
-        print(f"   ⏱️  Waited {delay:.1f}s for page to load")
         
-        # Manual navigation phase
-        print("\n" + "="*60)
-        print("🛠️  MANUAL NAVIGATION PHASE")
-        print("="*60)
-        print("📋 Please perform the following steps manually:")
-        print("   1. 📅 Click on 'Oldest' to sort videos chronologically")
-        print("   2. 🔄 Wait for the page to fully load")
-        print("   3. 📱 Scroll down if needed to see more videos")
-        print("   4. ✅ Verify you can see the video thumbnails")
-        print("\n💡 The browser window is open - you can interact with it now!")
-        print("🚀 Once you're ready, press ENTER to start automated scraping...")
+        # Automatic scrolling phase
+        print("\n🤖 Starting automatic scrolling and loading...")
         
-        # Wait for user input
-        try:
-            input()  # This will pause execution until user presses Enter
-        except KeyboardInterrupt:
-            print("\n👋 Scraping cancelled by user")
-            return video_data
+        # Wait for initial page load
+        time.sleep(3)
         
-        print("\n🤖 Starting automated scraping phase...")
-        delay = random_delay(1.5, 3)  # Random delay before starting
-        print(f"   ⏱️  Waited {delay:.1f}s before starting automation")
+        # Get initial page height
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        
+        # Scroll to bottom multiple times to load all videos
+        scroll_attempts = 0
+        max_scroll_attempts = 10  # Prevent infinite scrolling
+        
+        print("📜 Scrolling to load all videos...")
+        while scroll_attempts < max_scroll_attempts:
+            # Scroll to bottom
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            
+            # Wait for new content to load
+            time.sleep(2)
+            
+            # Calculate new scroll height and compare with last scroll height
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            
+            if new_height == last_height:
+                # No new content loaded, we've reached the end
+                break
+                
+            last_height = new_height
+            scroll_attempts += 1
+            print(f"   📜 Scroll attempt {scroll_attempts}: New content loaded")
+        
+        print(f"✅ Finished scrolling after {scroll_attempts} attempts")
+        
+        # Scroll back to top to start scraping from the beginning
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1)
+        
+        print("🤖 Starting automated scraping phase...")
         
         # Find all video containers
         print("🔍 Finding video containers...")
@@ -244,11 +273,6 @@ def scrape_tiktok_profile(url):
         
         for i in range(videos_to_scrape):
             try:
-                # Add a random delay between videos (except for the first one)
-                if i > 0:
-                    between_videos_delay = random_delay(1, 3)
-                    print(f"   ⏱️  Inter-video delay: {between_videos_delay:.1f}s")
-                
                 print(f"\n📹 Processing video {i + 1}/{videos_to_scrape}...")
                 
                 # Re-find video containers (they might change after navigation)
@@ -286,14 +310,7 @@ def scrape_tiktok_profile(url):
                         pass
                 
                 # Click on the video to open detailed view
-                click_delay = random_delay(0.5, 1.5)  # Random delay before click
-                print(f"   ⏱️  Pre-click delay: {click_delay:.1f}s")
-                
                 driver.execute_script("arguments[0].click();", video_container)
-                
-                # Random delay for video page to load
-                load_delay = random_delay(2.5, 4.5)  # Longer delay for video loading
-                print(f"   ⏱️  Video load delay: {load_delay:.1f}s")
                 
                 # Extract detailed metrics from the video page
                 likes = "0"
@@ -402,15 +419,11 @@ def scrape_tiktok_profile(url):
                 
                 # Go back to profile
                 driver.back()
-                back_delay = random_delay(1.5, 3)  # Random delay after going back
-                print(f"   ⏱️  Back navigation delay: {back_delay:.1f}s")
                 
             except Exception as e:
                 print(f"❌ Error processing video {i + 1}: {e}")
                 try:
                     driver.back()
-                    error_delay = random_delay(1, 2)  # Random delay after error
-                    print(f"   ⏱️  Error recovery delay: {error_delay:.1f}s")
                 except:
                     pass
                 continue
@@ -471,33 +484,175 @@ def save_to_csv(video_data, filename=None):
     print(f"   🔖 Total bookmarks: {total_bookmarks:,}")
     print(f"   💬 Total comments: {total_comments:,}")
 
+def save_to_csv_combined(video_data, filename=None):
+    """
+    Save combined video data from multiple profiles to CSV file.
+    
+    Args:
+        video_data (list): List of video data dictionaries with profile info
+        filename (str): Optional filename, defaults to timestamp-based name
+    """
+    if not video_data:
+        print("❌ No data to save")
+        return
+    
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"tiktok_scrape_combined_{timestamp}.csv"
+    
+    print(f"\n💾 Saving combined data to {filename}...")
+    
+    # Ensure data directory exists
+    os.makedirs('data', exist_ok=True)
+    filepath = os.path.join('data', filename)
+    
+    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['profile_name', 'profile_url', 'video_url', 'views', 'likes', 'bookmarks', 'comments', 
+                     'views_raw', 'likes_raw', 'bookmarks_raw', 'comments_raw', 'scraped_at']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        for video in video_data:
+            writer.writerow(video)
+    
+    print(f"✅ Saved {len(video_data)} videos from multiple profiles to {filepath}")
+    
+    # Print summary by profile
+    profiles = {}
+    for video in video_data:
+        profile_name = video.get('profile_name', 'unknown')
+        if profile_name not in profiles:
+            profiles[profile_name] = {
+                'videos': 0,
+                'views': 0,
+                'likes': 0,
+                'bookmarks': 0,
+                'comments': 0
+            }
+        profiles[profile_name]['videos'] += 1
+        profiles[profile_name]['views'] += video.get('views', 0)
+        profiles[profile_name]['likes'] += video.get('likes', 0)
+        profiles[profile_name]['bookmarks'] += video.get('bookmarks', 0)
+        profiles[profile_name]['comments'] += video.get('comments', 0)
+    
+    print(f"\n📊 Combined Scraping Summary by Profile:")
+    for profile_name, stats in profiles.items():
+        print(f"   👤 @{profile_name}:")
+        print(f"      📹 Videos: {stats['videos']}")
+        print(f"      👁️  Views: {stats['views']:,}")
+        print(f"      ❤️  Likes: {stats['likes']:,}")
+        print(f"      🔖 Bookmarks: {stats['bookmarks']:,}")
+        print(f"      💬 Comments: {stats['comments']:,}")
+
 def main():
     """
     Main function to run the TikTok scraper.
     """
     try:
-        # Step 1: Get TikTok URL from user
-        tiktok_url = get_tiktok_url()
+        # Step 1: Get TikTok URLs from user
+        tiktok_urls = get_tiktok_urls()
         
-        print(f"\n🎯 URL to scrape: {tiktok_url}")
-        
-        # Check if it's a profile URL
-        if not ('/@' in tiktok_url and '/video/' not in tiktok_url):
-            print("❌ Please provide a TikTok profile URL (not an individual video)")
-            print("   Example: https://www.tiktok.com/@username")
+        if not tiktok_urls:
+            print("❌ No URLs provided")
             return
         
-        # Step 2: Scrape the profile
-        video_data = scrape_tiktok_profile(tiktok_url)
+        # Step 2: Ask user for output preference
+        print("\n📂 Output Options:")
+        print("  1. Separate CSV file for each profile")
+        print("  2. Combined CSV file for all profiles")
         
-        if not video_data:
-            print("❌ No video data was extracted")
+        while True:
+            try:
+                choice = input("Choose option (1 or 2): ").strip()
+                if choice == '1':
+                    separate_files = True
+                    break
+                elif choice == '2':
+                    separate_files = False
+                    break
+                else:
+                    print("❌ Please enter 1 or 2")
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!")
+                return
+        
+        # Step 3: Process each URL
+        all_video_data = []
+        successful_scrapes = 0
+        
+        print(f"\n🚀 Starting to process {len(tiktok_urls)} profile(s)...")
+        print("=" * 60)
+        
+        for i, url in enumerate(tiktok_urls, 1):
+            print(f"\n📱 Processing Profile {i}/{len(tiktok_urls)}")
+            print(f"🔗 URL: {url}")
+            print("-" * 40)
+            
+            try:
+                # Scrape this profile
+                video_data = scrape_tiktok_profile(url)
+                
+                if video_data:
+                    successful_scrapes += 1
+                    
+                    if separate_files:
+                        # Save each profile to its own file
+                        profile_name = url.split('/@')[1].split('?')[0].split('/')[0] if '/@' in url else f"profile_{i}"
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{profile_name}_{timestamp}.csv"
+                        save_to_csv(video_data, filename)
+                    else:
+                        # Add to combined data
+                        # Add profile info to each video record
+                        profile_name = url.split('/@')[1].split('?')[0].split('/')[0] if '/@' in url else f"profile_{i}"
+                        for video in video_data:
+                            video['profile_name'] = profile_name
+                            video['profile_url'] = url
+                        all_video_data.extend(video_data)
+                    
+                    print(f"✅ Profile {i} completed: {len(video_data)} videos scraped")
+                else:
+                    print(f"❌ Profile {i} failed: No data extracted")
+                
+            except Exception as e:
+                print(f"❌ Error processing profile {i}: {e}")
+                continue
+            
+            # Continue to next profile immediately
+        
+        # Step 4: Handle combined output if needed
+        if not separate_files and all_video_data:
+            print(f"\n💾 Saving combined data from all profiles...")
+            # Update CSV fieldnames to include profile info
+            save_to_csv_combined(all_video_data)
+        
+        # Step 5: Final summary
+        print("\n" + "=" * 60)
+        print("🎉 SCRAPING QUEUE COMPLETED!")
+        print("=" * 60)
+        print(f"📊 Summary:")
+        print(f"   🎯 Total profiles queued: {len(tiktok_urls)}")
+        print(f"   ✅ Successfully processed: {successful_scrapes}")
+        print(f"   ❌ Failed: {len(tiktok_urls) - successful_scrapes}")
+        
+        if not separate_files and all_video_data:
+            total_videos = len(all_video_data)
+            total_views = sum(video['views'] for video in all_video_data)
+            total_likes = sum(video['likes'] for video in all_video_data)
+            total_bookmarks = sum(video['bookmarks'] for video in all_video_data)
+            total_comments = sum(video['comments'] for video in all_video_data)
+            
+            print(f"   📹 Total videos scraped: {total_videos}")
+            print(f"   👁️  Total views: {total_views:,}")
+            print(f"   ❤️  Total likes: {total_likes:,}")
+            print(f"   🔖 Total bookmarks: {total_bookmarks:,}")
+            print(f"   💬 Total comments: {total_comments:,}")
+        
+        if successful_scrapes == 0:
+            print("❌ No data was extracted from any profile")
             return
         
-        # Step 3: Save to CSV
-        save_to_csv(video_data)
-        
-        print("\n🎉 Scraping completed successfully!")
+        print("\n🎉 All profiles processed successfully!")
         
     except Exception as e:
         print(f"❌ An error occurred: {e}")
